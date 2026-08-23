@@ -1,6 +1,3 @@
-from gevent import monkey
-monkey.patch_all()
-
 import os
 from flask import Flask, render_template_string, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
@@ -8,12 +5,11 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'essa_walkie_admin_2026'
 
-# ترك async_mode ليتعرف عليه النظام تلقائياً وبشكل آمن
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 ADMIN_CODE = "1234"
-pending_users = {}   # {socket_id: {'name': name, 'room': room}}
-approved_users = {}  # {socket_id: {'name': name, 'room': room, 'is_admin': bool}}
+pending_users = {}   
+approved_users = {}  
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -47,7 +43,7 @@ HTML_TEMPLATE = """
         <div id="loginSection" class="card">
             <input type="text" id="username" placeholder="اسمك">
             <input type="text" id="roomInput" placeholder="رقم الغرفة (مثال: 101)" value="101">
-            <input type="password" id="adminCode" placeholder="رمز الأدمن (اختياري للأدمن فقط)">
+            <input type="password" id="adminCode" placeholder="رمز الأدمن (اختياري)">
             <button class="btn" onclick="requestJoin()">طلب الانضمام</button>
         </div>
 
@@ -95,7 +91,7 @@ HTML_TEMPLATE = """
         });
 
         function requestJoin() {
-            if (!socket.connected) return alert("جاري الاتصال بالسيرفر، يرجى الانتظار ثوانٍ ثم المحاولة.");
+            if (!socket.connected) return alert("جاري الاتصال بالسيرفر، يرجى الانتظار ثوانٍ.");
             myName = document.getElementById('username').value.trim();
             currentRoom = document.getElementById('roomInput').value.trim();
             const adminCode = document.getElementById('adminCode').value.trim();
@@ -155,7 +151,7 @@ HTML_TEMPLATE = """
             const blob = new Blob([data.audio], { type: 'audio/webm' });
             const url = URL.createObjectURL(blob);
             const audio = new Audio(url);
-            audio.play().catch(e => console.log("خطأ في تشغيل الصوت", e));
+            audio.play().catch(e => console.log(e));
         });
 
         socket.on('update_admin_lists', data => {
@@ -228,6 +224,7 @@ def handle_admin_action(data):
         socketio.emit('join_rejected', to=target_id)
         broadcast_admin_lists(room)
 
+    elif action == 'kick' هذا هو الكود الصحيح if target_id in approved_users:
     elif action == 'kick' and target_id in approved_users:
         room = approved_users[target_id]['room']
         approved_users.pop(target_id)
@@ -239,12 +236,10 @@ def handle_admin_action(data):
 def handle_disconnect():
     sid = request.sid
     room = None
-    
     if sid in pending_users:
         room = pending_users.pop(sid)['room']
     elif sid in approved_users:
         room = approved_users.pop(sid)['room']
-        
     if room:
         broadcast_admin_lists(room)
 
@@ -256,7 +251,6 @@ def handle_voice(data):
 def broadcast_admin_lists(room):
     pending = [{'id': k, 'name': v['name']} for k, v in pending_users.items() if v['room'] == room]
     approved = [{'id': k, 'name': v['name'], 'is_admin': v['is_admin']} for k, v in approved_users.items() if v['room'] == room]
-    
     for sid, u in approved_users.items():
         if u['room'] == room and u['is_admin']:
             emit('update_admin_lists', {'pending': pending, 'approved': approved}, to=sid)
