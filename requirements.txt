@@ -2,6 +2,6 @@ Flask
 Flask-SocketIO
 gevent
 gevent-websocket
-gunicorn
+gunicorn==22.0.0
 packaging
 setuptools
