@@ -4,9 +4,10 @@ from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'essa_walkie_admin_2026'
-socketio = SocketIO(app, cors_allowed_origins="*")
 
-# قائمة بغرف الانتظار والأعضاء المقبولين
+# تحديد async_mode='gevent' لضمان التوافق التام مع gevent-websocket على Render
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+
 ADMIN_CODE = "1234"  # رمز الأدمن الخاص بك
 pending_users = {}   # {socket_id: {'name': name, 'room': room}}
 approved_users = {}  # {socket_id: {'name': name, 'room': room, 'is_admin': bool}}
@@ -31,12 +32,14 @@ HTML_TEMPLATE = """
         .user-item { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 8px 12px; border-radius: 6px; margin-bottom: 5px; font-size: 14px; }
         .btn-kick { background: #dc2626; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
         .btn-approve { background: #16a34a; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; margin-left: 5px; }
+        .status-badge { font-size: 12px; margin-bottom: 10px; color: #38bdf8; }
         .hidden { display: none; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>📻 Essa Walkie Talkie</h1>
+        <div id="connStatus" class="status-badge">جاري الاتصال بالسيرفر...</div>
         
         <!-- واجهة الدخول -->
         <div id="loginSection" class="card">
@@ -71,13 +74,32 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
-    <script src="https://cdn.socketio.io/4.5.4/socket.io.min.js"></script>
+    <!-- تحميل مكتبة Socket.IO مباشرة من السيرفر المحلي لتجنب مشاكل CDN -->
+    <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
+        const socket = io({
+            transports: ['websocket', 'polling']
+        });
+
         let currentRoom = "", myName = "", isAdmin = false;
         let mediaRecorder, audioChunks = [], isSpeaking = false;
 
+        socket.on('connect', () => {
+            document.getElementById('connStatus').innerText = "متصل بالسيرفر ✅";
+            document.getElementById('connStatus').style.color = "#22c55e";
+        });
+
+        socket.on('connect_error', () => {
+            document.getElementById('connStatus').innerText = "جاري إعادة الاتصال... ⚠️";
+            document.getElementById('connStatus').style.color = "#eab308";
+        });
+
         function requestJoin() {
+            if (!socket.connected) {
+                alert("جاري الاتصال بالسيرفر، يرجى الانتظار ثوانٍ ثم المحاولة مجدداً.");
+                return;
+            }
+
             myName = document.getElementById('username').value.trim();
             currentRoom = document.getElementById('roomInput').value.trim();
             const adminCode = document.getElementById('adminCode').value.trim();
@@ -146,11 +168,9 @@ HTML_TEMPLATE = """
 
         socket.on('receive_voice', data => { new Audio(data.audio).play(); });
 
-        // إدارة الأدمن
         socket.on('update_admin_lists', data => {
             if(!isAdmin) return;
             
-            // طلبات الانتظار
             let pHTML = "<b>طلبات الدخول:</b><br>";
             data.pending.forEach(u => {
                 pHTML += `<div class="user-item"><span>${u.name}</span><div>
@@ -160,7 +180,6 @@ HTML_TEMPLATE = """
             });
             document.getElementById('pendingList').innerHTML = pHTML;
 
-            // المتواجدون بالداخل
             let uHTML = "<br><b>المتواجدون بالغرفة:</b><br>";
             data.approved.forEach(u => {
                 uHTML += `<div class="user-item"><span>${u.name}</span>
