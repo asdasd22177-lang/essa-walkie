@@ -1,11 +1,11 @@
 import os
 from flask import Flask, render_template_string, request
-from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
+from flask_socketio import SocketIO, emit, join_room, leave_room
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'essa_walkie_admin_2026'
 
-# تحديد async_mode='gevent' لضمان التوافق التام مع gevent-websocket على Render
+# تحديد async_mode لضمان التوافق مع خوادم Render
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
 ADMIN_CODE = "1234"  # رمز الأدمن الخاص بك
@@ -27,8 +27,8 @@ HTML_TEMPLATE = """
         .card { background: #0f172a; border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid #334155; }
         input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #475569; background: #1e293b; color: white; text-align: center; font-size: 15px; margin-bottom: 8px; }
         .btn { background: #0284c7; color: white; width: 100%; padding: 10px; border-radius: 8px; border: none; font-size: 15px; font-weight: bold; cursor: pointer; }
-        .talk-btn { width: 150px; height: 150px; border-radius: 50%; background: linear-gradient(145deg, #22c55e, #16a34a); color: white; font-size: 18px; font-weight: bold; border: none; box-shadow: 0 0 20px rgba(34, 197, 94, 0.4); cursor: pointer; user-select: none; margin: 15px auto; display: flex; align-items: center; justify-content: center; }
-        .talk-btn:active, .talk-btn.active { transform: scale(0.95); background: linear-gradient(145deg, #ef4444, #dc2626); }
+        .talk-btn { width: 150px; height: 150px; border-radius: 50%; background: linear-gradient(145deg, #22c55e, #16a34a); color: white; font-size: 18px; font-weight: bold; border: none; box-shadow: 0 0 20px rgba(34, 197, 94, 0.4); cursor: pointer; user-select: none; margin: 15px auto; display: flex; align-items: center; justify-content: center; touch-action: manipulation; }
+        .talk-btn:active, .talk-btn.active { transform: scale(0.95); background: linear-gradient(145deg, #ef4444, #dc2626); box-shadow: 0 0 20px rgba(239, 68, 68, 0.6); }
         .user-item { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 8px 12px; border-radius: 6px; margin-bottom: 5px; font-size: 14px; }
         .btn-kick { background: #dc2626; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
         .btn-approve { background: #16a34a; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; margin-left: 5px; }
@@ -60,8 +60,8 @@ HTML_TEMPLATE = """
             <p id="statusText" style="margin-top:10px;">اضغط وتحدث ليسمعك الجميع ✅</p>
             
             <button class="talk-btn" id="talkBtn" 
-                    onmousedown="startSpeaking()" onmouseup="stopSpeaking()"
-                    ontouchstart="startSpeaking(event)" ontouchend="stopSpeaking(event)">
+                    onmousedown="startSpeaking(event)" onmouseup="stopSpeaking(event)" onmouseleave="stopSpeaking(event)"
+                    ontouchstart="startSpeaking(event)" ontouchend="stopSpeaking(event)" ontouchcancel="stopSpeaking(event)">
                 تحدث الآن 🎙️
             </button>
 
@@ -74,13 +74,10 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
-    <!-- تحميل مكتبة Socket.IO مباشرة من السيرفر المحلي لتجنب مشاكل CDN -->
+    <!-- تحميل مكتبة Socket.IO -->
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io({
-            transports: ['websocket', 'polling']
-        });
-
+        const socket = io({ transports: ['websocket', 'polling'] });
         let currentRoom = "", myName = "", isAdmin = false;
         let mediaRecorder, audioChunks = [], isSpeaking = false;
 
@@ -94,12 +91,13 @@ HTML_TEMPLATE = """
             document.getElementById('connStatus').style.color = "#eab308";
         });
 
-        function requestJoin() {
-            if (!socket.connected) {
-                alert("جاري الاتصال بالسيرفر، يرجى الانتظار ثوانٍ ثم المحاولة مجدداً.");
-                return;
-            }
+        socket.on('disconnect', () => {
+            document.getElementById('connStatus').innerText = "تم قطع الاتصال ❌";
+            document.getElementById('connStatus').style.color = "#ef4444";
+        });
 
+        function requestJoin() {
+            if (!socket.connected) return alert("جاري الاتصال بالسيرفر، يرجى الانتظار ثوانٍ ثم المحاولة.");
             myName = document.getElementById('username').value.trim();
             currentRoom = document.getElementById('roomInput').value.trim();
             const adminCode = document.getElementById('adminCode').value.trim();
@@ -108,7 +106,6 @@ HTML_TEMPLATE = """
 
             document.getElementById('loginSection').classList.add('hidden');
             document.getElementById('waitSection').classList.remove('hidden');
-
             socket.emit('request_join', { name: myName, room: currentRoom, admin_code: adminCode });
         }
 
@@ -118,33 +115,24 @@ HTML_TEMPLATE = """
             document.getElementById('appSection').classList.remove('hidden');
             document.getElementById('currentRoom').innerText = currentRoom;
             document.getElementById('currentUser').innerText = myName + (isAdmin ? " (أدمن)" : "");
-
             if(isAdmin) document.getElementById('adminPanel').classList.remove('hidden');
             initMicrophone();
         });
 
-        socket.on('join_rejected', () => {
-            alert("❌ تم رفض طلب دخولك للغرفة من قبل الأدمن.");
-            location.reload();
-        });
-
-        socket.on('kicked', () => {
-            alert("⚠️ تم إخراجك من الغرفة بواسطة الأدمن.");
-            location.reload();
-        });
+        socket.on('join_rejected', () => { alert("❌ تم رفض طلبك."); location.reload(); });
+        socket.on('kicked', () => { alert("⚠️ تم إخراجك من الغرفة."); location.reload(); });
 
         function initMicrophone() {
             navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
                 mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
                 mediaRecorder.onstop = () => {
                     const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                     audioChunks = [];
-                    const reader = new FileReader();
-                    reader.readAsDataURL(audioBlob);
-                    reader.onloadend = () => {
-                        socket.emit('voice_data', { room: currentRoom, audio: reader.result });
-                    };
+                    // إرسال الصوت كبيانات ثنائية (أسرع وأخف)
+                    audioBlob.arrayBuffer().then(buffer => {
+                        socket.emit('voice_data', { room: currentRoom, audio: buffer });
+                    });
                 };
             }).catch(err => alert("يرجى إعطاء إذن الميكروفون للعمل"));
         }
@@ -166,11 +154,16 @@ HTML_TEMPLATE = """
             mediaRecorder.stop();
         }
 
-        socket.on('receive_voice', data => { new Audio(data.audio).play(); });
+        // استقبال وتشغيل الصوت الثنائي
+        socket.on('receive_voice', data => {
+            const blob = new Blob([data.audio], { type: 'audio/webm' });
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            audio.play().catch(e => console.log("خطأ في تشغيل الصوت", e));
+        });
 
         socket.on('update_admin_lists', data => {
             if(!isAdmin) return;
-            
             let pHTML = "<b>طلبات الدخول:</b><br>";
             data.pending.forEach(u => {
                 pHTML += `<div class="user-item"><span>${u.name}</span><div>
@@ -205,15 +198,16 @@ def index():
 def handle_request(data):
     sid = request.sid
     is_admin = (data.get('admin_code') == ADMIN_CODE)
+    room = data['room']
     
     if is_admin:
-        approved_users[sid] = {'name': data['name'], 'room': data['room'], 'is_admin': True}
-        join_room(data['room'])
+        approved_users[sid] = {'name': data['name'], 'room': room, 'is_admin': True}
+        join_room(room)
         emit('join_approved', {'is_admin': True})
-        broadcast_admin_lists(data['room'])
     else:
-        pending_users[sid] = {'name': data['name'], 'room': data['room']}
-        broadcast_admin_lists(data['room'])
+        pending_users[sid] = {'name': data['name'], 'room': room}
+    
+    broadcast_admin_lists(room)
 
 @socketio.on('admin_action')
 def handle_admin_action(data):
@@ -226,21 +220,38 @@ def handle_admin_action(data):
 
     if action == 'approve' and target_id in pending_users:
         u_info = pending_users.pop(target_id)
-        approved_users[target_id] = {'name': u_info['name'], 'room': u_info['room'], 'is_admin': False}
+        room = u_info['room']
+        approved_users[target_id] = {'name': u_info['name'], 'room': room, 'is_admin': False}
         socketio.emit('join_approved', {'is_admin': False}, to=target_id)
-        join_room(u_info['room'], sid=target_id)
-        broadcast_admin_lists(u_info['room'])
+        join_room(room, sid=target_id)
+        broadcast_admin_lists(room)
 
     elif action == 'reject' and target_id in pending_users:
+        room = pending_users[target_id]['room']
         pending_users.pop(target_id)
         socketio.emit('join_rejected', to=target_id)
-        broadcast_admin_lists(approved_users[sid]['room'])
+        broadcast_admin_lists(room)
 
     elif action == 'kick' and target_id in approved_users:
-        u_info = approved_users.pop(target_id)
+        room = approved_users[target_id]['room']
+        approved_users.pop(target_id)
         socketio.emit('kicked', to=target_id)
-        leave_room(u_info['room'], sid=target_id)
-        broadcast_admin_lists(u_info['room'])
+        leave_room(room, sid=target_id)
+        broadcast_admin_lists(room)
+
+# --- كود معالجة قطع الاتصال التلقائي ---
+@socketio.on('disconnect')
+def handle_disconnect():
+    sid = request.sid
+    room = None
+    
+    if sid in pending_users:
+        room = pending_users.pop(sid)['room']
+    elif sid in approved_users:
+        room = approved_users.pop(sid)['room']
+        
+    if room:
+        broadcast_admin_lists(room)
 
 @socketio.on('voice_data')
 def handle_voice(data):
