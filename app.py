@@ -4,7 +4,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'essa_walkie_admin_2026'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # قائمة بغرف الانتظار والأعضاء المقبولين
 ADMIN_CODE = "1234"  # رمز الأدمن الخاص بك
