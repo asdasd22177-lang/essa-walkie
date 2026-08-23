@@ -1,3 +1,6 @@
+from gevent import monkey
+monkey.patch_all()
+
 import os
 from flask import Flask, render_template_string, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
@@ -5,10 +8,10 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'essa_walkie_admin_2026'
 
-# تحديد async_mode لضمان التوافق مع خوادم Render
+# ترك async_mode ليتعرف عليه النظام تلقائياً وبشكل آمن
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
-ADMIN_CODE = "1234"  # رمز الأدمن الخاص بك
+ADMIN_CODE = "1234"
 pending_users = {}   # {socket_id: {'name': name, 'room': room}}
 approved_users = {}  # {socket_id: {'name': name, 'room': room, 'is_admin': bool}}
 
@@ -41,7 +44,6 @@ HTML_TEMPLATE = """
         <h1>📻 Essa Walkie Talkie</h1>
         <div id="connStatus" class="status-badge">جاري الاتصال بالسيرفر...</div>
         
-        <!-- واجهة الدخول -->
         <div id="loginSection" class="card">
             <input type="text" id="username" placeholder="اسمك">
             <input type="text" id="roomInput" placeholder="رقم الغرفة (مثال: 101)" value="101">
@@ -49,12 +51,10 @@ HTML_TEMPLATE = """
             <button class="btn" onclick="requestJoin()">طلب الانضمام</button>
         </div>
 
-        <!-- واجهة الانتظار -->
         <div id="waitSection" class="card hidden">
             <p style="color: #eab308;">⏳ بانتظار موافقة الأدمن على دخولك...</p>
         </div>
 
-        <!-- واجهة التطبيق الرئيسية -->
         <div id="appSection" class="card hidden">
             <p style="font-size: 14px; color: #94a3b8;">الغرفة: <span id="currentRoom" style="color:#38bdf8;"></span> | المستخدم: <span id="currentUser"></span></p>
             <p id="statusText" style="margin-top:10px;">اضغط وتحدث ليسمعك الجميع ✅</p>
@@ -65,7 +65,6 @@ HTML_TEMPLATE = """
                 تحدث الآن 🎙️
             </button>
 
-            <!-- لوحة تحكم الأدمن -->
             <div id="adminPanel" class="hidden" style="margin-top:15px; border-top:1px solid #334155; padding-top:10px;">
                 <h3 style="color:#ef4444; font-size:15px; margin-bottom:8px;">🛠️ لوحة تحكم الأدمن</h3>
                 <div id="pendingList"></div>
@@ -74,10 +73,9 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
-    <!-- تحميل مكتبة Socket.IO -->
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
-        const socket = io({ transports: ['websocket', 'polling'] });
+        const socket = io();
         let currentRoom = "", myName = "", isAdmin = false;
         let mediaRecorder, audioChunks = [], isSpeaking = false;
 
@@ -129,7 +127,6 @@ HTML_TEMPLATE = """
                 mediaRecorder.onstop = () => {
                     const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                     audioChunks = [];
-                    // إرسال الصوت كبيانات ثنائية (أسرع وأخف)
                     audioBlob.arrayBuffer().then(buffer => {
                         socket.emit('voice_data', { room: currentRoom, audio: buffer });
                     });
@@ -154,7 +151,6 @@ HTML_TEMPLATE = """
             mediaRecorder.stop();
         }
 
-        // استقبال وتشغيل الصوت الثنائي
         socket.on('receive_voice', data => {
             const blob = new Blob([data.audio], { type: 'audio/webm' });
             const url = URL.createObjectURL(blob);
@@ -239,7 +235,6 @@ def handle_admin_action(data):
         leave_room(room, sid=target_id)
         broadcast_admin_lists(room)
 
-# --- كود معالجة قطع الاتصال التلقائي ---
 @socketio.on('disconnect')
 def handle_disconnect():
     sid = request.sid
