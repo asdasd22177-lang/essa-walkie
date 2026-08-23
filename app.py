@@ -5,7 +5,8 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'essa_walkie_admin_2026'
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+# استخدام gevent لضمان الاستقرار التام
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
 ADMIN_CODE = "1234"
 pending_users = {}   
@@ -224,7 +225,6 @@ def handle_admin_action(data):
         socketio.emit('join_rejected', to=target_id)
         broadcast_admin_lists(room)
 
-    elif action == 'kick' هذا هو الكود الصحيح if target_id in approved_users:
     elif action == 'kick' and target_id in approved_users:
         room = approved_users[target_id]['room']
         approved_users.pop(target_id)
