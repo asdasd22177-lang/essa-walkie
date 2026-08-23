@@ -1,3 +1,6 @@
+From gevent import monkey
+monkey.patch_all()
+
 import os
 from flask import Flask, render_template_string, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
