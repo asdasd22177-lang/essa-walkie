@@ -1,6 +1,5 @@
 Flask
 Flask-SocketIO
-eventlet
+gevent
+gevent-websocket
 gunicorn
-packaging
-setuptools
