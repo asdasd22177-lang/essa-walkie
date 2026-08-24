@@ -58,7 +58,7 @@ HTML_TEMPLATE = """
         </div>
 
         <div id="waitSection" class="card hidden">
-            <p style="color: #eab308; font-size: 14px;">⏳ بانتظار موافقة الأدمن على دخولك...</p>
+            <p style="color: #eab308; font-size: 14px;">⏳ جاري تسجيل الدخول واستعادة الجلسة...</p>
         </div>
 
         <div id="appSection" class="card hidden">
@@ -90,6 +90,8 @@ HTML_TEMPLATE = """
                 <h3 style="color:#ef4444; font-size:14px; margin-bottom:6px;">🛠️ لوحة تحكم الأدمن (طلبات الانضمام)</h3>
                 <div id="pendingList"></div>
             </div>
+            
+            <button class="btn" style="background: #475569; margin-top: 10px; font-size: 12px; padding: 5px;" onclick="logout()">تسجيل الخروج / تغيير الاسم</button>
         </div>
     </div>
 
@@ -98,35 +100,32 @@ HTML_TEMPLATE = """
         const socket = io();
         let currentRoom = "", myName = "", isAdmin = false;
         let mediaRecorder, audioChunks = [], isSpeaking = false, isMuted = false;
-
-        // استرجاع الاسم والغرفة المحفوظة مسبقاً في المتصفح تلقائياً
-        window.onload = function() {
-            if(localStorage.getItem('essa_walkie_name')) {
-                document.getElementById('username').value = localStorage.getItem('essa_walkie_name');
-            }
-            if(localStorage.getItem('essa_walkie_room')) {
-                document.getElementById('roomInput').value = localStorage.getItem('essa_walkie_room');
-            }
-        };
-
-        function playBeep(freq = 440, duration = 100) {
-            try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.type = "sine";
-                osc.frequency.value = freq;
-                gain.gain.setValueAtTime(0.1, ctx.currentTime);
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.start();
-                setTimeout(() => { osc.stop(); ctx.close(); }, duration);
-            } catch(e) {}
-        }
+        let autoLoginAttempted = false;
 
         socket.on('connect', () => {
             document.getElementById('connStatus').innerText = "متصل بالسيرفر ✅";
             document.getElementById('connStatus').style.color = "#22c55e";
+
+            if (!autoLoginAttempted) {
+                const savedName = localStorage.getItem('essa_walkie_name');
+                const savedRoom = localStorage.getItem('essa_walkie_room');
+                const savedAdminCode = localStorage.getItem('essa_walkie_admin_code') || "";
+
+                if (savedName && savedRoom) {
+                    autoLoginAttempted = true;
+                    myName = savedName;
+                    currentRoom = savedRoom;
+                    
+                    document.getElementById('username').value = savedName;
+                    document.getElementById('roomInput').value = savedRoom;
+                    if(savedAdminCode) document.getElementById('adminCode').value = savedAdminCode;
+
+                    document.getElementById('loginSection').classList.add('hidden');
+                    document.getElementById('waitSection').classList.remove('hidden');
+                    
+                    socket.emit('request_join', { name: myName, room: currentRoom, admin_code: savedAdminCode });
+                }
+            }
         });
 
         socket.on('connect_error', () => {
@@ -147,9 +146,13 @@ HTML_TEMPLATE = """
 
             if(!myName || !currentRoom) return alert("يرجى كتابة الاسم ورقم الغرفة");
 
-            // حفظ الاسم والغرفة في ذاكرة المتصفح لكي لا تضطر لكتابتها مجدداً
             localStorage.setItem('essa_walkie_name', myName);
             localStorage.setItem('essa_walkie_room', currentRoom);
+            if(adminCode) {
+                localStorage.setItem('essa_walkie_admin_code', adminCode);
+            } else {
+                localStorage.removeItem('essa_walkie_admin_code');
+            }
 
             document.getElementById('loginSection').classList.add('hidden');
             document.getElementById('waitSection').classList.remove('hidden');
@@ -167,8 +170,35 @@ HTML_TEMPLATE = """
             playBeep(600, 150);
         });
 
-        socket.on('join_rejected', () => { alert("❌ تم رفض طلبك."); location.reload(); });
-        socket.on('kicked', () => { alert("⚠️ تم إخراجك من الغرفة."); location.reload(); });
+        socket.on('join_rejected', () => { 
+            alert("❌ تم رفض طلبك."); 
+            logout();
+        });
+        
+        socket.on('kicked', () => { 
+            alert("⚠️ تم إخراجك من الغرفة."); 
+            logout();
+        });
+
+        function logout() {
+            localStorage.clear();
+            location.reload();
+        }
+
+        function playBeep(freq = 440, duration = 100) {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = "sine";
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                setTimeout(() => { osc.stop(); ctx.close(); }, duration);
+            } catch(e) {}
+        }
 
         function toggleMute() {
             isMuted = !isMuted;
@@ -285,13 +315,25 @@ def handle_request(data):
     sid = request.sid
     is_admin = (data.get('admin_code') == ADMIN_CODE)
     room = data['room']
+    name = data['name']
     
+    # تنظيف أي جلسات قديمة لنفس المستخدم في نفس الغرفة لمنع تكرار الأسماء عند التحديث
+    old_approved = [s for s, u in approved_users.items() if u['room'] == room and u['name'] == name]
+    for s in old_approved:
+        approved_users.pop(s, None)
+        if room in speaking_state and s in speaking_state[room]:
+            speaking_state[room].pop(s)
+            
+    old_pending = [s for s, u in pending_users.items() if u['room'] == room and u['name'] == name]
+    for s in old_pending:
+        pending_users.pop(s, None)
+
     if is_admin:
-        approved_users[sid] = {'name': data['name'], 'room': room, 'is_admin': True}
+        approved_users[sid] = {'name': name, 'room': room, 'is_admin': True}
         join_room(room)
         emit('join_approved', {'is_admin': True})
     else:
-        pending_users[sid] = {'name': data['name'], 'room': room}
+        pending_users[sid] = {'name': name, 'room': room}
     
     broadcast_room_data(room)
 
