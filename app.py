@@ -11,10 +11,9 @@ app.config['SECRET_KEY'] = 'essa_walkie_admin_2026'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
 ADMIN_CODE = "1234"
-pending_users = {}       # الطلبات المعلقة الحالية
-approved_users = {}      # المستخدمون المتواجدون حالياً
-room_approved_names = {} # الأسماء التي حصلت على موافقة مسبقة في الغرفة (لتجاوز الانتظار عند التحديث)
-speaking_state = {}      
+pending_users = {}   
+approved_users = {}  
+speaking_state = {}  
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -59,7 +58,7 @@ HTML_TEMPLATE = """
         </div>
 
         <div id="waitSection" class="card hidden">
-            <p style="color: #eab308; font-size: 14px;">⏳ بانتظار موافقة الأدمن للدخول...</p>
+            <p style="color: #eab308; font-size: 14px;">⏳ جاري تسجيل الدخول واستعادة الجلسة...</p>
         </div>
 
         <div id="appSection" class="card hidden">
@@ -103,6 +102,7 @@ HTML_TEMPLATE = """
         let mediaRecorder, audioChunks = [], isSpeaking = false, isMuted = false;
         let autoLoginAttempted = false;
 
+        // عند الاتصال بالسيرفر، تحقق إذا كانت هناك بيانات مخزنية مسجلة لتسجيل الدخول تلقائياً
         socket.on('connect', () => {
             document.getElementById('connStatus').innerText = "متصل بالسيرفر ✅";
             document.getElementById('connStatus').style.color = "#22c55e";
@@ -122,6 +122,9 @@ HTML_TEMPLATE = """
                     if(savedAdminCode) document.getElementById('adminCode').value = savedAdminCode;
 
                     document.getElementById('loginSection').classList.add('hidden');
+                    document.getElementById('waitSection').classList.remove('hidden');
+                    
+                    // إرسال طلب الانضمام تلقائياً بالبيانات المحفوظة
                     socket.emit('request_join', { name: myName, room: currentRoom, admin_code: savedAdminCode });
                 }
             }
@@ -145,6 +148,7 @@ HTML_TEMPLATE = """
 
             if(!myName || !currentRoom) return alert("يرجى كتابة الاسم ورقم الغرفة");
 
+            // حفظ الاسم، الغرفة، ورمز الأدمن في ذاكرة المتصفح
             localStorage.setItem('essa_walkie_name', myName);
             localStorage.setItem('essa_walkie_room', currentRoom);
             if(adminCode) {
@@ -313,28 +317,14 @@ def index():
 def handle_request(data):
     sid = request.sid
     is_admin = (data.get('admin_code') == ADMIN_CODE)
-    room = data.get('room', '').strip()
-    name = data.get('name', '').strip()
+    room = data['room']
     
-    if not room or not name:
-        return
-
-    if room not in room_approved_names:
-        room_approved_names[room] = set()
-
     if is_admin:
-        approved_users[sid] = {'name': name, 'room': room, 'is_admin': True}
-        room_approved_names[room].add(name)
+        approved_users[sid] = {'name': data['name'], 'room': room, 'is_admin': True}
         join_room(room)
         emit('join_approved', {'is_admin': True})
-    elif name in room_approved_names[room]:
-        # إذا كان الاسم موافَق عليه مسبقاً (عند تحديث الصفحة)، يتم إدخاله فوراً بدون انتظار الأدمن!
-        approved_users[sid] = {'name': name, 'room': room, 'is_admin': False}
-        join_room(room)
-        emit('join_approved', {'is_admin': False})
     else:
-        # مستخدم جديد تماماً، يذهب لقائمة الانتظار
-        pending_users[sid] = {'name': name, 'room': room}
+        pending_users[sid] = {'name': data['name'], 'room': room}
     
     broadcast_room_data(room)
 
@@ -359,13 +349,7 @@ def handle_admin_action(data):
     if action == 'approve' and target_id in pending_users:
         u_info = pending_users.pop(target_id)
         room = u_info['room']
-        name = u_info['name']
-        
-        if room not in room_approved_names:
-            room_approved_names[room] = set()
-        room_approved_names[room].add(name)
-
-        approved_users[target_id] = {'name': name, 'room': room, 'is_admin': False}
+        approved_users[target_id] = {'name': u_info['name'], 'room': room, 'is_admin': False}
         socketio.emit('join_approved', {'is_admin': False}, to=target_id)
         join_room(room, sid=target_id)
         broadcast_room_data(room)
@@ -377,14 +361,8 @@ def handle_admin_action(data):
         broadcast_room_data(room)
 
     elif action == 'kick' and target_id in approved_users:
-        u_info = approved_users.pop(target_id)
-        room = u_info['room']
-        name = u_info['name']
-        
-        # إزالة الاسم من القائمة المسموحة لكي يحتاج لموافقة إذا حاول الدخول مجدداً بعد الطرد
-        if room in room_approved_names and name in room_approved_names[room]:
-            room_approved_names[room].remove(name)
-
+        room = approved_users[target_id]['room']
+        approved_users.pop(target_id)
         if target_id in speaking_state.get(room, {}):
             speaking_state[room].pop(target_id)
         socketio.emit('kicked', to=target_id)
