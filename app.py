@@ -99,6 +99,16 @@ HTML_TEMPLATE = """
         let currentRoom = "", myName = "", isAdmin = false;
         let mediaRecorder, audioChunks = [], isSpeaking = false, isMuted = false;
 
+        // استرجاع الاسم والغرفة المحفوظة مسبقاً في المتصفح تلقائياً
+        window.onload = function() {
+            if(localStorage.getItem('essa_walkie_name')) {
+                document.getElementById('username').value = localStorage.getItem('essa_walkie_name');
+            }
+            if(localStorage.getItem('essa_walkie_room')) {
+                document.getElementById('roomInput').value = localStorage.getItem('essa_walkie_room');
+            }
+        };
+
         function playBeep(freq = 440, duration = 100) {
             try {
                 const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -137,6 +147,10 @@ HTML_TEMPLATE = """
 
             if(!myName || !currentRoom) return alert("يرجى كتابة الاسم ورقم الغرفة");
 
+            // حفظ الاسم والغرفة في ذاكرة المتصفح لكي لا تضطر لكتابتها مجدداً
+            localStorage.setItem('essa_walkie_name', myName);
+            localStorage.setItem('essa_walkie_room', currentRoom);
+
             document.getElementById('loginSection').classList.add('hidden');
             document.getElementById('waitSection').classList.remove('hidden');
             socket.emit('request_join', { name: myName, room: currentRoom, admin_code: adminCode });
@@ -170,7 +184,6 @@ HTML_TEMPLATE = """
 
         function initMicrophone() {
             navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-                // إعدادات محسنة لضغط الصوت وتخفيف حجمه ليكون أسرع بكثير
                 mediaRecorder = new MediaRecorder(stream, { 
                     mimeType: 'audio/webm;codecs=opus',
                     audioBitsPerSecond: 24000 
